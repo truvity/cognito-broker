@@ -19,3 +19,14 @@ token:
   # The parameter tree holding client_id, client_secret, token_url and
   # scopes. Any additional key is passed through to the output.
   path: /dms/e2e/devel
+
+  # Isolated worlds for the suite. One fresh id is generated per name per
+  # run: the platform creates a tenant lazily from the header and stores
+  # nothing in advance, so a new id IS a new empty tenant -- and reusing
+  # one would let a previous run's leftovers decide this run's result.
+  #
+  # One token serves all of them. Tenancy is the header, not the
+  # credential, so a second app client would buy nothing.
+  tenants:
+    - primary
+    - secondary

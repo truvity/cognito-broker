@@ -26,6 +26,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -36,6 +37,7 @@ import (
 
 	"github.com/truvity/cognito-broker/pkg/cognito"
 	"github.com/truvity/cognito-broker/pkg/profile"
+	"github.com/truvity/cognito-broker/pkg/tenant"
 )
 
 // configName is the file looked for, walking up from the working
@@ -65,6 +67,13 @@ type config struct {
 		Region  string `yaml:"region"`
 		Profile string `yaml:"profile"`
 		Path    string `yaml:"path"`
+
+		// Tenants names the isolated worlds the suite wants. The tool
+		// generates a fresh id per name per run, because the platform
+		// creates tenants lazily from the header and stores nothing in
+		// advance -- so a new id IS a new empty tenant, and reusing one
+		// would let a previous run's leftovers decide this run's result.
+		Tenants []string `yaml:"tenants"`
 	} `yaml:"token"`
 }
 
@@ -82,6 +91,8 @@ func run(argv []string) error {
 	region := fs.String("region", "", "AWS region (overrides config)")
 	awsProfile := fs.String("profile", "", "AWS profile to resolve credentials with (overrides config)")
 	format := fs.String("format", "json", "output format: json or raw")
+	output := fs.String("output", "-", "write to this file instead of stdout (- means stdout)")
+	tenants := fs.String("tenants", "", "comma-separated tenant names to generate ids for (overrides config)")
 
 	if err := fs.Parse(argv); err != nil {
 		return err
@@ -134,21 +145,47 @@ func run(argv []string) error {
 		return err
 	}
 
+	out, closeOut, err := openOutput(*output)
+	if err != nil {
+		return err
+	}
+
+	defer closeOut()
+
 	if *format == "raw" {
-		_, err := fmt.Fprintln(os.Stdout, tok.AccessToken)
+		_, err := fmt.Fprintln(out, tok.AccessToken)
 
 		return err
 	}
 
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
+	names := tenant.ParseNames(*tenants)
+	if len(names) == 0 {
+		names = cfg.Token.Tenants
+	}
 
-	return enc.Encode(map[string]any{
+	ids, err := tenant.Generate(names)
+	if err != nil {
+		return err
+	}
+
+	body := map[string]any{
 		"access_token": tok.AccessToken,
 		"token_type":   tok.TokenType,
 		"expires_at":   time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second).UTC().Format(time.RFC3339),
 		"profile":      prof.Public(),
-	})
+	}
+
+	// Omitted entirely rather than emitted empty: a consumer that does
+	// not ask for tenants should not have to distinguish "none asked
+	// for" from "asked and got none".
+	if len(ids) > 0 {
+		body["tenants"] = ids
+	}
+
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+
+	return enc.Encode(body)
 }
 
 // pick returns the first non-empty value, which is the precedence order
@@ -216,4 +253,33 @@ func findConfig() (string, error) {
 
 		dir = parent
 	}
+}
+
+// openOutput returns the destination and a closer. "-" means stdout,
+// which is not closed.
+//
+// A file is created 0600 and truncated. The mode is not incidental: the
+// contents are a live bearer token, and the default 0644 would leave it
+// readable by every account on a shared machine for the whole of its
+// lifetime.
+func openOutput(path string) (io.Writer, func(), error) {
+	if path == "" || path == "-" {
+		return os.Stdout, func() {}, nil
+	}
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open %s: %w", path, err)
+	}
+
+	// Re-assert the mode: O_CREATE only applies it when the file did not
+	// already exist, so an existing world-readable file would otherwise
+	// keep its permissions and quietly receive a token.
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+
+		return nil, nil, fmt.Errorf("chmod %s: %w", path, err)
+	}
+
+	return f, func() { _ = f.Close() }, nil
 }

@@ -5,8 +5,9 @@ coordinates held in **AWS Systems Manager** — using an ordinary AWS
 session and nothing else.
 
 ```console
-$ cognito-broker                  # JSON: token, expiry, non-secret profile
-$ cognito-broker --format raw     # the token alone
+$ cognito-broker                     # JSON: token, expiry, tenants, profile
+$ cognito-broker --format raw        # the token alone
+$ cognito-broker -o e2e/config.json  # straight to a file, created 0600
 ```
 
 ---
@@ -141,6 +142,10 @@ request in every repository that authenticates against it.
   "access_token": "eyJ...",
   "token_type": "Bearer",
   "expires_at": "2026-09-01T12:00:00Z",
+  "tenants": {
+    "primary": "3f2b...",
+    "secondary": "9a41..."
+  },
   "profile": {
     "client_id": "...",
     "api_url": "https://dms.devel.example.xyz",
@@ -149,12 +154,36 @@ request in every repository that authenticates against it.
 }
 ```
 
+### Tenants
+
+One token serves every tenant. Tenancy travels in a **header**, not in
+the credential, so a second app client or a second token would buy
+nothing — the same token with two different tenant ids is two isolated
+worlds.
+
+Ids are fresh per run. The platform creates a tenant lazily on first
+use and stores nothing in advance, so a new id *is* a new empty tenant;
+reusing one across runs would let a previous run's leftovers decide this
+run's result.
+
+`tenants` is omitted from the output entirely when none are requested,
+so a consumer never has to tell "none asked for" from "asked and got
+none".
+
 `profile` carries through every SSM key **except** anything
 credential-shaped. That filter is deliberately over-eager: this output
 lands in CI logs, where omitting a harmless key costs a config edit and
 including a secret one costs a rotation.
 
 `--format raw` prints the token alone, for `TOKEN=$(cognito-broker --format raw)`.
+
+### Writing to a file
+
+`-o PATH` writes there instead of stdout, creating the file **0600** —
+and re-asserting that mode on a file that already existed, since
+`O_CREATE` applies permissions only to files it creates. The contents
+are a live bearer token; the default 0644 would leave it readable by
+every account on the machine for its whole lifetime.
 
 ---
 
