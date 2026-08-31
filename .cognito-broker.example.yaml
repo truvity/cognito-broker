@@ -1,0 +1,21 @@
+# Committed by a repository whose integration tests need a platform token.
+#
+# Deliberately absent: role, account, pool id, client id, endpoint.
+# Roles and accounts belong in aws.ini (reviewed); pool and client
+# coordinates belong in the SSM tree (rotatable without a pull request).
+token:
+  # AWS region holding the parameter tree.
+  region: eu-central-1
+
+  # Which aws.ini profile to resolve credentials with. A SELECTOR, not a
+  # grant -- aws.ini still defines what that identity may reach.
+  #
+  # Committed rather than left to the caller's AWS_PROFILE because the
+  # choice belongs to the repository, and because a CI default profile is
+  # often deliberately something else (the runner's pod identity) that
+  # cannot read this tree.
+  profile: test
+
+  # The parameter tree holding client_id, client_secret, token_url and
+  # scopes. Any additional key is passed through to the output.
+  path: /dms/e2e/devel

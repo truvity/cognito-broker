@@ -1,0 +1,53 @@
+project_name: cognito-broker
+
+version: 2
+
+builds:
+  # There is only one artifact, and it is a CLI. Shipped for darwin as
+  # well as linux because half its purpose is that an engineer runs the
+  # SAME command on a laptop that CI runs on a runner.
+  - id: cognito-broker
+    main: ./cmd/cognito-broker
+    binary: cognito-broker
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.Version={{.Version}}
+
+archives:
+  - id: cognito-broker
+    ids:
+      - cognito-broker
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+release:
+  github:
+    owner: truvity
+    name: cognito-broker
+  header: |
+    ## cognito-broker {{ .Tag }}
+
+changelog:
+  use: github
+  groups:
+    - title: Features
+      regexp: '^feat'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^fix'
+      order: 1
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
